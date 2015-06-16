@@ -1,0 +1,145 @@
+---
+title: "Practical Machine Learning - Course Project Writeup"
+author: "Dino Chioda"
+date: "June 16, 2015"
+output: html_document
+---
+
+## Executive Summary
+
+Devices such as Jawbone Up, Nike FuelBand, and Fitbit are now able to collect a large amount of data about personal activity relatively inexpensively. These devices are used extensively by members of the quantified self movement – people regularly quantify how much of a particular activity they do. However, one this these people don't do so well is to quantify how well they do the activity.
+
+This report will describe the steps taken to build a machine learning model to predict the manner in which an individual exercised. This value is stored in the datasets in the "classe" variable.
+
+
+## Loading and Prepping the Data
+
+Let's download the training and test datasets from the source and load them into separate data frames. We'll also take this opportunity to call out any missing or improper data and flag it as such.
+
+```{r echo=FALSE}
+setwd("/Users/Dino/Documents/Coursera/Data Science Specialization/8 - Practical Machine Learning/PML-Course-Project")
+```
+```{r}
+url_train <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_test <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if (!file.exists("data")) {
+        dir.create("data")
+}
+destfile_train <- "./data/data_train.csv"
+destfile_test <- "./data/data_test.csv"
+if (!file.exists(destfile_train)) {
+        download.file(url = url_train, destfile = destfile_train, mode= "w", method="curl")
+}
+if (!file.exists(destfile_test)) {
+        download.file(url = url_test, destfile = destfile_test, mode = "w", method="curl")
+}
+train <- read.csv(file = destfile_train, na.strings = c('NA','#DIV/0!',''))
+test <- read.csv(file = destfile_test, na.strings = c('NA','#DIV/0!',''))
+```
+
+
+## Creating Training, Test and Validation Datasets
+
+Let's begin by coercing some of the variables to numeric values. We'll be doing this to all of the variables except the last one, which is the variable we're trying to predict.
+
+```{r}
+for (i in c(8:ncol(train)-1)) {
+  train[,i] = as.numeric(as.character(train[,i]))
+  test[,i] = as.numeric(as.character(test[,i]))
+}
+```
+
+Let's remove the unnecessary columns from the training dataset. We'll be retaining only the variables that have no missing or N/A values - i.e. we'll retain columns with "complete" data. What we end up with is a training dataset with only the 53 columns that describe how an activity was performed.
+
+```{r}
+index <- colnames(train)
+index <- colnames(train[colSums(is.na(train)) == 0])
+index <- index[-c(1:7)]
+```
+
+Since we should apply the model to the test dataset only once, we will need to create another "test" dataset, which for this purpose we will call the validation dataset. We'll retain 80% of the data for training and reserve the remaining 20% for validation.
+
+```{r}
+library(caret)
+set.seed(1972)
+train_index <- createDataPartition(y=train$classe, p=0.80, list=FALSE)
+train_ds <- train[train_index,index]
+validate_ds <- train[-train_index,index]
+dim(train_ds)
+dim(validate_ds)
+```
+
+As can be seen from the above outputs, 15699 rows of data are in the training dataset and 3923 rows are in the validation dataset. This corresponds to 80% and 20% of the original training dataset, respectively.
+
+
+## A Quick Look at the Exercise Class Variable ...
+
+It's a good idea to look at how the classe data is distributed in the training dataset. This distribution will give us an informal gauge to evaluate the model's prediction outcome on the validation dataset. A histogram is well suited to this task:
+
+```{r fig.align='center'}
+library(ggplot2)
+qplot(train_ds$classe,
+      geom = "histogram",
+      binwidth = 1,
+      main = "Frequency of Exercise Class in Training Data",
+      xlab = "Exercise Class",
+      ylab = "Frequency",
+      fill = I("turquoise"),
+      col = I("blue")
+      )
+```
+
+
+## Training the Model and Assessing the Predictions
+
+We'll use a random forest model to perform an initial prediction of the Type of Exercise. 
+
+```{r fig.align='center'}
+library(randomForest)
+rf_model <- train(classe ~ ., data = train_ds, method = 'rf', trControl = trainControl(method = "cv", number = 4, allowParallel = TRUE, verboseIter = FALSE))
+rf_predict <- predict(rf_model,validate_ds)
+rf_confMatrix <- confusionMatrix(rf_predict,validate_ds$classe)
+```
+
+Let's look at the confusion matrix of the model to see how accurate are the predictions:
+
+```{r}
+rf_confMatrix$table
+```
+
+As can be seen from the above matrix, most of the predictions fall in the diagonal of the matrix, which shows that the accuracy of the prediction is very good. In total, only 22 predictions out of 3923 are incorrect. This is **`r round(100*(1-22/3923),2)`%** accurate. We can consider this test to be very accurate, indeed!
+
+
+## Applying the Training Model to the Test Dataset
+
+The moment of truth has arrived! We'll be testing the model (developed using the training dataset and validated using the validation dataset) on the test dataset. First we have to rename the last column of the test dataset to "classe", just as we did for the training and validation datasets.
+
+```{r}
+colnames(test)[length(colnames(test))] <- "classe"
+rf_test <- predict(rf_model, test[,index])
+rf_test
+```
+
+As expected, we get a set of 20 predictions, one for each record of the test dataset.
+
+
+## Submitting the Predictions to Coursera
+
+Using the code provided in the assignment instructions, we will generate a file for each of the 20 predictions of the test dataset. The contents of each file will be a single letter, A through E, which denotes the Type of Exercise. These files will be submitted manually to the Submission page of the assignment.
+
+```{r}
+if (!file.exists("answers")) {
+        dir.create("answers")
+}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./answers/","problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(rf_test)
+```
+
+
+
